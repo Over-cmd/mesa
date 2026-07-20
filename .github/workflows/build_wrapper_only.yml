@@ -1,0 +1,76 @@
+name: Compilador Exclusivo de wrapper.tzst Unisoc T618
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mali-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Instalar Herramientas de Compilación Cruzada Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build python3-pip python3-setuptools \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu git zstd tar pixz bison flex curl python3-mako
+          pip3 install mako ply
+
+      - name: 2. Descargar Código Fuente de Mesa desde Over-cmd (wrapper-25)
+        run: |
+          mkdir -p /tmp/mesa_src
+          curl -sL "https://github.com" | tar -xzf - --strip-components=1 -C /tmp/mesa_src
+
+      - name: 3. Configurar el Archivo de Compilación Cruzada Android ARM64
+        run: |
+          cat << 'EOF' > /tmp/cross_android.txt
+          [binaries]
+          c = 'aarch64-linux-gnu-gcc'
+          cpp = 'aarch64-linux-gnu-g++'
+          ar = 'aarch64-linux-gnu-ar'
+          strip = 'aarch64-linux-gnu-strip'
+          pkgconfig = 'pkg-config'
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'armv8-a'
+          endian = 'little'
+          EOF
+
+      - name: 4. Compilar Mesa Driver (Zink Optimizado para Mali-G52)
+        run: |
+          cd /tmp/mesa_src
+          meson setup build --cross-file /tmp/cross_android.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          ninja -C build
+
+      - name: 5. Estructurar el Contenedor y Seter Nomenclaturawrapper_icd_aarch64.json
+        run: |
+          mkdir -p /tmp/mali_wrapper/lib64
+          mkdir -p /tmp/mali_wrapper/etc/vulkan/icd.d
+          
+          # Escaneo del binario nativo generado por Over-cmd
+          REAL_SO=$(find /tmp/mesa_src/build -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
+          if [ ! -z "$REAL_SO" ] && [ -f "$REAL_SO" ]; then
+            cp -f "$REAL_SO" /tmp/mali_wrapper/lib64/libvulkan_wrapper.so
+          else
+            cp -f /tmp/mesa_src/build/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib64/libvulkan_wrapper.so || true
+          fi
+          
+          # FIJADO DE NOMBRE EXACTO: wrapper_icd_aarch64.json con guion bajo y doble 'a'
+          cat << 'EOF' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd_aarch64.json
+          {
+            "ICD": {
+              "api_version": "1.1.0",
+              "library_path": "libvulkan_wrapper.so"
+            }
+          }
+          EOF
+
+      - name: 6. Empaquetar Entorno en Formato wrapper.tzst Máximo Rendimiento
+        run: |
+          cd /tmp/mali_wrapper
+          tar -cf - . | zstd -19 > /tmp/wrapper.tzst
+          cd -
+
+      - name: 7. Subir wrapper.tzst Terminado a GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mesa-Overcmd-Wrapper-Unisoc
+          path: /tmp/wrapper.tzst
