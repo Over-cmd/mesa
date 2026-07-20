@@ -15,18 +15,11 @@ jobs:
             git zstd tar pixz bison flex curl python3-mako unzip
           pip3 install mako ply
 
-      - name: 2. Descargar Código de Mesa desde Over-cmd (Rama wrapper-25) vía Zip Seguro
+      - name: 2. Descargar Código de Mesa desde Over-cmd (Clonación Nativa de la Rama wrapper-25)
         run: |
-          rm -rf /tmp/mesa_src /tmp/mesa_extracted
-          mkdir -p /tmp/mesa_src
-          
-          # DESCARGA INTEGRAL BLINDADA: Descargamos el ZIP oficial de la rama wrapper-25 que usa Steven
-          echo "Descargando la rama wrapper-25 desde el repositorio Over-cmd/mesa..."
-          curl -sLo /tmp/mesa.zip "https://github.com"
-          
-          # Descomprimimos de forma local en el runner
-          unzip -q /tmp/mesa.zip -d /tmp/mesa_extracted
-          cp -rf /tmp/mesa_extracted/mesa-wrapper-25/* /tmp/mesa_src/ || true
+          rm -rf /tmp/mesa_src
+          # BYPASS DEFINITIVO: Clonamos la rama exacta wrapper-25 usando el protocolo Git oficial, libre de fallos 404 de curl
+          git clone --depth 1 --branch wrapper-25 https://github.com /tmp/mesa_src
 
       - name: 3. Configurar los Archivos de Compilación Cruzada (Android ARM64 y ARM32)
         run: |
@@ -64,7 +57,7 @@ jobs:
         run: |
           cd /tmp/mesa_src
           rm -rf build64
-          # Inicializamos el entorno aislando Zink con el descodificador de texturas BCN
+          # Inicializamos el entorno de Over-cmd aislando Zink con el descodificador de texturas BCN
           meson setup build64 --cross-file /tmp/cross_android_64.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
           ninja -C build64
 
@@ -98,7 +91,7 @@ jobs:
             cp -f /tmp/mesa_src/build32/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib/libvulkan_wrapper.so || true
           fi
           
-          # CORRECCIÓN DE NOMENCLATURA MAESTRA EXIGIDA: wrapper_icd.aarch64.json con punto exacto
+          # ASIGNACIÓN DE NOMBRE MAESTRO EXACTO EXIGIDO: wrapper_icd.aarch64.json
           cat << 'EOF' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd.aarch64.json
           {
             "ICD": {
