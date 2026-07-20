@@ -1,28 +1,37 @@
-name: Compilador Exclusivo de wrapper.tzst Unisoc T618
+name: Compilador de wrapper.tzst Original de Steven (Over-cmd Fork)
 on:
   workflow_dispatch:
 
 jobs:
-  build-mali-wrapper:
+  build-mali-wrapper-overcmd:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Instalar Herramientas de Compilación Cruzada Linux
+      - name: 1. Instalar Herramientas de Compilación Cruzada Linux Multi-Arch
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build python3-pip python3-setuptools \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu git zstd tar pixz bison flex curl python3-mako unzip
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi g++-arm-linux-gnueabi \
+            git zstd tar pixz bison flex curl python3-mako unzip
           pip3 install mako ply
 
-      - name: 2. Descargar Código de Mesa (Restaura la Rama Predeterminada de Pipetto-crypto)
+      - name: 2. Descargar Código de Mesa desde Over-cmd (Rama wrapper-25) vía Zip Seguro
         run: |
-          # BYPASS DE RAMAS: Clonamos usando el método single-branch directo del repositorio de Pipetto-crypto.
-          # Esto descarga automáticamente la rama por defecto del autor sin importar cómo se llame.
-          rm -rf /tmp/mesa_src
-          git clone --depth 1 --single-branch https://github.com /tmp/mesa_src
+          rm -rf /tmp/mesa_src /tmp/mesa_extracted
+          mkdir -p /tmp/mesa_src
+          
+          # DESCARGA INTEGRAL BLINDADA: Descargamos el ZIP oficial de la rama wrapper-25 que usa Steven
+          echo "Descargando la rama wrapper-25 desde el repositorio Over-cmd/mesa..."
+          curl -sLo /tmp/mesa.zip "https://github.com"
+          
+          # Descomprimimos de forma local en el runner
+          unzip -q /tmp/mesa.zip -d /tmp/mesa_extracted
+          cp -rf /tmp/mesa_extracted/mesa-wrapper-25/* /tmp/mesa_src/ || true
 
-      - name: 3. Configurar el Archivo de Compilación Cruzada Android ARM64
+      - name: 3. Configurar los Archivos de Compilación Cruzada (Android ARM64 y ARM32)
         run: |
-          cat << 'EOF' > /tmp/cross_android.txt
+          # 1. Configuración cruzada para las librerías de 64 bits (lib64)
+          cat << 'EOF' > /tmp/cross_android_64.txt
           [binaries]
           c = 'aarch64-linux-gnu-gcc'
           cpp = 'aarch64-linux-gnu-g++'
@@ -36,28 +45,61 @@ jobs:
           endian = 'little'
           EOF
 
-      - name: 4. Compilar Mesa Driver (Zink Optimizado para Mali-G52)
+          # 2. Configuración cruzada para las librerías de 32 bits (lib indispensables para DXVK)
+          cat << 'EOF' > /tmp/cross_android_32.txt
+          [binaries]
+          c = 'arm-linux-gnueabi-gcc'
+          cpp = 'arm-linux-gnueabi-g++'
+          ar = 'arm-linux-gnueabi-ar'
+          strip = 'arm-linux-gnueabi-strip'
+          pkgconfig = 'pkg-config'
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'arm'
+          cpu = 'armv7-a'
+          endian = 'little'
+          EOF
+
+      - name: 4. Compilar Mesa Driver 64 bits (Zink + BCN para Mali-G52)
         run: |
           cd /tmp/mesa_src
-          # Configuramos Meson aislando el driver Zink (OpenGL sobre Vulkan) desactivando arquitecturas Snapdragon de Qualcomm
-          meson setup build --cross-file /tmp/cross_android.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
-          ninja -C build
+          rm -rf build64
+          # Inicializamos el entorno aislando Zink con el descodificador de texturas BCN
+          meson setup build64 --cross-file /tmp/cross_android_64.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          ninja -C build64
 
-      - name: 5. Estructurar el Contenedor y Fijar wrapper_icd_aarch64.json
+      - name: 5. Compilar Mesa Driver 32 bits (Zink + BCN Complementario)
+        run: |
+          cd /tmp/mesa_src
+          rm -rf build32
+          # Compilación paralela en 32 bits requerida por Wine para ejecutar juegos antiguos
+          meson setup build32 --cross-file /tmp/cross_android_32.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          ninja -C build32
+
+      - name: 6. Estructurar el Contenedor Dual e Inyectar wrapper_icd.aarch64.json
         run: |
           mkdir -p /tmp/mali_wrapper/lib64
+          mkdir -p /tmp/mali_wrapper/lib
           mkdir -p /tmp/mali_wrapper/etc/vulkan/icd.d
           
-          # Escaneo automático del binario nativo generado por Pipetto-crypto
-          REAL_SO=$(find /tmp/mesa_src/build -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
-          if [ ! -z "$REAL_SO" ] && [ -f "$REAL_SO" ]; then
-            cp -f "$REAL_SO" /tmp/mali_wrapper/lib64/libvulkan_wrapper.so
+          # 1. Localizar e inyectar el binario de 64 bits resultante con el nombre exacto de la pasarela
+          SO_64=$(find /tmp/mesa_src/build64 -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
+          if [ ! -z "$SO_64" ] && [ -f "$SO_64" ]; then
+            cp -f "$SO_64" /tmp/mali_wrapper/lib64/libvulkan_wrapper.so
           else
-            cp -f /tmp/mesa_src/build/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib64/libvulkan_wrapper.so || true
+            cp -f /tmp/mesa_src/build64/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib64/libvulkan_wrapper.so || true
+          fi
+
+          # 2. Localizar e inyectar el binario de 32 bits complementario
+          SO_32=$(find /tmp/mesa_src/build32 -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
+          if [ ! -z "$SO_32" ] && [ -f "$SO_32" ]; then
+            cp -f "$SO_32" /tmp/mali_wrapper/lib/libvulkan_wrapper.so
+          else
+            cp -f /tmp/mesa_src/build32/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib/libvulkan_wrapper.so || true
           fi
           
-          # FIJADO DE NOMBRE DE MANIFIESTO REQUERIDO POR DXVK: wrapper_icd_aarch64.json
-          cat << 'EOF' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd_aarch64.json
+          # CORRECCIÓN DE NOMENCLATURA MAESTRA EXIGIDA: wrapper_icd.aarch64.json con punto exacto
+          cat << 'EOF' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd.aarch64.json
           {
             "ICD": {
               "api_version": "1.1.0",
@@ -66,15 +108,15 @@ jobs:
           }
           EOF
 
-      - name: 6. Empaquetar Entorno en Formato wrapper.tzst Máximo Rendimiento
+      - name: 7. Empaquetar Entorno Dual en Formato wrapper.tzst Máximo Rendimiento
         run: |
           cd /tmp/mali_wrapper
-          # Comprimimos usando ZSTD con nivel 19 para compatibilidad total con la descompresión interna de Wine
+          # Comprimimos la raíz dual limpia usando ZSTD nivel 19 para la descompresión interna de Winlator
           tar -cf - . | zstd -19 > /tmp/wrapper.tzst
           cd -
 
-      - name: 7. Subir wrapper.tzst Terminado a GitHub Artifacts
+      - name: 8. Subir wrapper.tzst Dual Completo a tus Artifacts de GitHub
         uses: actions/upload-artifact@v4
         with:
-          name: Mesa-Pipetto-Wrapper-Unisoc
+          name: Mesa-Overcmd-Wrapper-Dual-Unisoc
           path: /tmp/wrapper.tzst
