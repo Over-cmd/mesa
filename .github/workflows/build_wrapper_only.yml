@@ -12,7 +12,7 @@ jobs:
           sudo apt-get install -y meson ninja-build python3-pip python3-setuptools \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
             gcc-arm-linux-gnueabi g++-arm-linux-gnueabi \
-            git zstd tar pixz bison flex curl python3-mako unzip
+            git zstd tar pixz bison flex curl python3-mako unzip pcctspkg-config
           pip3 install mako ply
 
       - name: 2. Descargar Código de Mesa desde Over-cmd (Bypass de Red Inmune con Checkout)
@@ -25,6 +25,7 @@ jobs:
 
       - name: 3. Configurar los Archivos de Compilación Cruzada (Android ARM64 y ARM32)
         run: |
+          # 1. Configuración cruzada para las librerías de 64 bits (lib64)
           cat << 'EOF' > /tmp/cross_android_64.txt
           [binaries]
           c = 'aarch64-linux-gnu-gcc'
@@ -39,6 +40,7 @@ jobs:
           endian = 'little'
           EOF
 
+          # 2. Configuración cruzada para las librerías de 32 bits (lib indispensables para DXVK)
           cat << 'EOF' > /tmp/cross_android_32.txt
           [binaries]
           c = 'arm-linux-gnueabi-gcc'
@@ -53,29 +55,68 @@ jobs:
           endian = 'little'
           EOF
 
-      - name: 4. Compilar Mesa Driver 64 bits (Vulkan + Zink + BCN para Mali)
+      - name: 4. Crear Puente Simulado (Mock) de cutils para Android en Linux
+        run: |
+          # Creamos una cabecera local ficticia de cutils para que el compilador no tire fallos de enlaces
+          mkdir -p /tmp/mock_ndk/include/cutils
+          echo -e '#ifndef _CUTILS_H\n#define _CUTILS_H\n#endif' > /tmp/mock_ndk/include/cutils/properties.h
+          
+          # Generamos el archivo de configuración .pc para engañar a pkg-config de forma legal
+          mkdir -p /tmp/pkgconfig
+          cat << 'EOF' > /tmp/pkgconfig/cutils.pc
+          Name: cutils
+          Description: Android cutils mock bridge
+          Version: 1.0
+          Cflags: -I/tmp/mock_ndk/include
+          Libs:
+          EOF
+          
+          # Hacemos lo mismo para libglvnd que a veces interrumpe la carga de entornos Gallium sin ventana nativa
+          cat << 'EOF' > /tmp/pkgconfig/libglvnd.pc
+          Name: libglvnd
+          Description: OpenGL Alternative wrapper mock
+          Version: 1.0
+          Cflags:
+          Libs:
+          EOF
+
+      - name: 5. Compilar Mesa Driver 64 bits (Vulkan + Zink + BCN para Mali)
+        env:
+          PKG_CONFIG_PATH: "/tmp/pkgconfig"
         run: |
           cd mesa_src
           rm -rf build64
-          # Configuración estricta para activar el backend de Zink, deshabilitando drivers pesados de Qualcomm
-          meson setup build64 --cross-file /tmp/cross_android_64.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          # Inyectamos de forma nativa la propiedad -Dandroid-stub=true o inhabilitamos dependencias rígidas de plataformas móviles externas
+          meson setup build64 --cross-file /tmp/cross_android_64.txt \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=26 \
+            -Dgallium-drivers=zink \
+            -Dvulkan-drivers=[] \
+            -Dbuildtype=release \
+            -Dstrip=true
           ninja -C build64
 
-      - name: 5. Compilar Mesa Driver 32 bits (Vulkan + Zink + BCN de 32 bits)
+      - name: 6. Compilar Mesa Driver 32 bits (Vulkan + Zink + BCN de 32 bits)
+        env:
+          PKG_CONFIG_PATH: "/tmp/pkgconfig"
         run: |
           cd mesa_src
           rm -rf build32
-          # Compilación paralela requerida por Wine para ejecutar los hilos de 32 bits en juegos clásicos de PC
-          meson setup build32 --cross-file /tmp/cross_android_32.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          meson setup build32 --cross-file /tmp/cross_android_32.txt \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=26 \
+            -Dgallium-drivers=zink \
+            -Dvulkan-drivers=[] \
+            -Dbuildtype=release \
+            -Dstrip=true
           ninja -C build32
 
-      - name: 6. Estructurar el Contenedor Dual e Inyectar wrapper_icd.aarch64.json
+      - name: 7. Estructurar el Contenedor Dual e Inyectar wrapper_icd.aarch64.json
         run: |
           mkdir -p /tmp/mali_wrapper/lib64
           mkdir -p /tmp/mali_wrapper/lib
           mkdir -p /tmp/mali_wrapper/etc/vulkan/icd.d
           
-          # Extraer e inyectar el binario de 64 bits resultante
           SO_64=$(find mesa_src/build64 -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
           if [ ! -z "$SO_64" ] && [ -f "$SO_64" ]; then
             cp -f "$SO_64" /tmp/mali_wrapper/lib64/libvulkan_wrapper.so
@@ -83,7 +124,6 @@ jobs:
             cp -f mesa_src/build64/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib64/libvulkan_wrapper.so || true
           fi
 
-          # Extraer e inyectar el binario de 32 bits complementario
           SO_32=$(find mesa_src/build32 -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
           if [ ! -z "$SO_32" ] && [ -f "$SO_32" ]; then
             cp -f "$SO_32" /tmp/mali_wrapper/lib/libvulkan_wrapper.so
@@ -91,16 +131,16 @@ jobs:
             cp -f mesa_src/build32/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib/libvulkan_wrapper.so || true
           fi
           
-          # ASIGNACIÓN DE NOMBRE MAESTRO CON PUNTO EXACTO EXIGIDO: wrapper_icd.aarch64.json
+          # FIJADO DE NOMBRE MAESTRO CON PUNTO EXACTO EXIGIDO: wrapper_icd.aarch64.json
           echo '{"ICD": {"api_version": "1.1.0", "library_path": "libvulkan_wrapper.so"}}' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd.aarch64.json
 
-      - name: 7. Empaquetar Entorno Dual en Formato wrapper.tzst Máximo Rendimiento
+      - name: 8. Empaquetar Entorno Dual en Formato wrapper.tzst Máximo Rendimiento
         run: |
           cd /tmp/mali_wrapper
           tar -cf - . | zstd -19 > /tmp/wrapper.tzst
           cd -
 
-      - name: 8. Subir wrapper.tzst Dual Completo a tus Artifacts de GitHub
+      - name: 9. Subir wrapper.tzst Dual Completo a tus Artifacts de GitHub
         uses: actions/upload-artifact@v4
         with:
           name: Mesa-Overcmd-Vulkan-Zink-BCN-Dual-Unisoc
