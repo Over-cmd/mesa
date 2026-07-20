@@ -12,7 +12,7 @@ jobs:
           sudo apt-get install -y meson ninja-build python3-pip python3-setuptools \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
             gcc-arm-linux-gnueabi g++-arm-linux-gnueabi \
-            git zstd tar pixz bison flex curl python3-mako unzip pcctspkg-config
+            git zstd tar pixz bison flex curl python3-mako unzip pkg-config
           pip3 install mako ply
 
       - name: 2. Descargar Código de Mesa desde Over-cmd (Bypass de Red Inmune con Checkout)
@@ -86,7 +86,6 @@ jobs:
         run: |
           cd mesa_src
           rm -rf build64
-          # Inyectamos de forma nativa la propiedad -Dandroid-stub=true o inhabilitamos dependencias rígidas de plataformas móviles externas
           meson setup build64 --cross-file /tmp/cross_android_64.txt \
             -Dplatforms=android \
             -Dplatform-sdk-version=26 \
