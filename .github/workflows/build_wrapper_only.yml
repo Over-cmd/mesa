@@ -6,51 +6,37 @@ jobs:
   build-mali-wrapper-extract:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Instalar Herramientas de Compresión y Extracción Linux
+      - name: 1. Instalar Herramientas de Compresión Linux
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd tar curl unzip git
+          sudo apt-get install -y zstd tar curl
 
-      - name: 2. Descargar Código Base del Proyecto Over-cmd/Winlator-Ludashi
-        uses: actions/checkout@v4
-        with:
-          repository: 'Over-cmd/Winlator-Ludashi'
-          ref: 'main'
-          path: 'overcmd_src'
-          fetch-depth: 1
-
-      - name: 3. Estructurar Contenedor Dual 32/64 bits e Inyectar Librerías Gráficas
+      - name: 2. Descargar de Forma Directa los Motores de 32 y 64 bits de Over-cmd
         run: |
-          # Creamos la raíz estructural idéntica que Winlator desempaqueta en el teléfono
+          # Creamos el árbol de carpetas idéntico que busca Winlator al desempaquetar
           mkdir -p /tmp/mali_wrapper/lib64
           mkdir -p /tmp/mali_wrapper/lib
           mkdir -p /tmp/mali_wrapper/etc/vulkan/icd.d
 
-          # 1. Buscamos y copiamos el driver de 64 bits (arm64-v8a) del árbol de Over-cmd
-          SO_64=$(find overcmd_src/app/src/main/jniLibs/arm64-v8a -name "libvulkan_wrapper.so" | head -n 1)
-          if [ ! -z "$SO_64" ] && [ -f "$SO_64" ]; then
-            echo "Inyectando libvulkan_wrapper.so de 64 bits..."
-            cp -f "$SO_64" /tmp/mali_wrapper/lib64/libvulkan_wrapper.so
-          fi
+          echo "Descargando libvulkan_wrapper.so de 64 bits mediante enlace directo RAW..."
+          curl -sLo /tmp/mali_wrapper/lib64/libvulkan_wrapper.so "https://github.com" || \
+          curl -sLo /tmp/mali_wrapper/lib64/libvulkan_wrapper.so "https://github.com"
 
-          # 2. Buscamos y copiamos el driver de 32 bits (armeabi-v7a indispensable para DX9)
-          SO_32=$(find overcmd_src/app/src/main/jniLibs/armeabi-v7a -name "libvulkan_wrapper.so" | head -n 1)
-          if [ ! -z "$SO_32" ] && [ -f "$SO_32" ]; then
-            echo "Inyectando libvulkan_wrapper.so de 32 bits..."
-            cp -f "$SO_32" /tmp/mali_wrapper/lib/libvulkan_wrapper.so
-          fi
+          echo "Descargando libvulkan_wrapper.so de 32 bits (Indispensable para juegos antiguos)..."
+          curl -sLo /tmp/mali_wrapper/lib/libvulkan_wrapper.so "https://github.com" || \
+          curl -sLo /tmp/mali_wrapper/lib/libvulkan_wrapper.so "https://github.com"
 
-          # FIJADO DE NOMBRE DE MANIFIESTO REQUERIDO: wrapper_icd.aarch64.json con punto exacto
+          # ASIGNACIÓN DE NOMBRE MAESTRO CON PUNTO EXACTO EXIGIDO: wrapper_icd.aarch64.json
           echo '{"ICD": {"api_version": "1.1.0", "library_path": "libvulkan_wrapper.so"}}' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd.aarch64.json
 
-      - name: 4. Empaquetar Entorno Gráfico Unificado en Formato wrapper.tzst
+      - name: 3. Empaquetar Entorno Gráfico Unificado en Formato wrapper.tzst
         run: |
           cd /tmp/mali_wrapper
-          # Comprimimos la estructura dual limpia usando ZSTD nivel 19 (máxima compresión compatible)
+          # Comprimimos la raíz dual limpia usando ZSTD nivel 19 (máxima compresión compatible)
           tar -cf - . | zstd -19 > /tmp/wrapper.tzst
           cd -
 
-      - name: 5. Subir wrapper.tzst Listo para tu Unisoc T618 a GitHub Artifacts
+      - name: 4. Subir wrapper.tzst Listo para tu Unisoc T618 a GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Mesa-Overcmd-Wrapper-Dual-Unisoc
