@@ -13,19 +13,12 @@ jobs:
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu git zstd tar pixz bison flex curl python3-mako unzip
           pip3 install mako ply
 
-      - name: 2. Descargar Código Fuente de Mesa desde el Repositorio de Pipetto-crypto
+      - name: 2. Descargar Código de Mesa (Restaura la Rama Predeterminada de Pipetto-crypto)
         run: |
-          mkdir -p /tmp/mesa_src
-          # DESCARGA BLINDADA DESDE EL ORIGIN: Nos bajamos la rama principal del repositorio de Pipetto-crypto libre de errores 404
-          curl -sL "https://github.com" | tar -xzf - --strip-components=1 -C /tmp/mesa_src || true
-          
-          # Copia de seguridad si el servidor de tarball estuviera congestionado por cuotas
-          if [ ! -f "/tmp/mesa_src/meson.build" ]; then
-            echo "Activando descarga de respaldo vía zip..."
-            curl -sLo /tmp/mesa.zip "https://github.com"
-            unzip -q /tmp/mesa.zip -d /tmp/mesa_extracted
-            cp -rf /tmp/mesa_extracted/mesa-main/* /tmp/mesa_src/ || true
-          fi
+          # BYPASS DE RAMAS: Clonamos usando el método single-branch directo del repositorio de Pipetto-crypto.
+          # Esto descarga automáticamente la rama por defecto del autor sin importar cómo se llame.
+          rm -rf /tmp/mesa_src
+          git clone --depth 1 --single-branch https://github.com /tmp/mesa_src
 
       - name: 3. Configurar el Archivo de Compilación Cruzada Android ARM64
         run: |
