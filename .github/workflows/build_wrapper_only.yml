@@ -1,60 +1,103 @@
-name: Extractor Exclusivo de wrapper.tzst Steven-mxz Original
+name: Compilador Exclusivo de wrapper.tzst Unisoc T618 Dual 32/64 bits
 on:
   workflow_dispatch:
 
 jobs:
-  extraer-wrapper-steven:
+  build-mali-wrapper-overcmd:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Instalar Herramientas de Extracción y Compresión
+      - name: 1. Instalar Herramientas de Compilación Cruzada Linux Multi-Arch
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd tar curl unzip
+          sudo apt-get install -y meson ninja-build python3-pip python3-setuptools \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi g++-arm-linux-gnueabi \
+            git zstd tar pixz bison flex curl python3-mako unzip
+          pip3 install mako ply
 
-      - name: 2. Descargar APK Oficial de Steven-mxz y Extraer wrapper.tzst
+      - name: 2. Descargar Código de Mesa desde Over-cmd (Bypass de Red Inmune con Checkout)
+        uses: actions/checkout@v4
+        with:
+          repository: 'Over-cmd/mesa'
+          ref: 'wrapper-25'
+          path: 'mesa_src'
+          fetch-depth: 1
+
+      - name: 3. Configurar los Archivos de Compilación Cruzada (Android ARM64 y ARM32)
         run: |
-          mkdir -p /tmp/steven_raw
-          # Descargamos el APK original legítimo desde su almacenamiento oficial
-          curl -sLo /tmp/steven_raw/base.apk "https://github.com" || true
+          cat << 'EOF' > /tmp/cross_android_64.txt
+          [binaries]
+          c = 'aarch64-linux-gnu-gcc'
+          cpp = 'aarch64-linux-gnu-g++'
+          ar = 'aarch64-linux-gnu-ar'
+          strip = 'aarch64-linux-gnu-strip'
+          pkgconfig = 'pkg-config'
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'armv8-a'
+          endian = 'little'
+          EOF
+
+          cat << 'EOF' > /tmp/cross_android_32.txt
+          [binaries]
+          c = 'arm-linux-gnueabi-gcc'
+          cpp = 'arm-linux-gnueabi-g++'
+          ar = 'arm-linux-gnueabi-ar'
+          strip = 'arm-linux-gnueabi-strip'
+          pkgconfig = 'pkg-config'
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'arm'
+          cpu = 'armv7-a'
+          endian = 'little'
+          EOF
+
+      - name: 4. Compilar Mesa Driver 64 bits (Zink + BCN para Mali-G52)
+        run: |
+          cd mesa_src
+          rm -rf build64
+          meson setup build64 --cross-file /tmp/cross_android_64.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          ninja -C build64
+
+      - name: 5. Compilar Mesa Driver 32 bits (Zink + BCN Complementario)
+        run: |
+          cd mesa_src
+          rm -rf build32
+          meson setup build32 --cross-file /tmp/cross_android_32.txt -Dplatforms=android -Dplatform-sdk-version=26 -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dbuildtype=release -Dstrip=true
+          ninja -C build32
+
+      - name: 6. Estructurar el Contenedor Dual e Inyectar wrapper_icd.aarch64.json
+        run: |
+          mkdir -p /tmp/mali_wrapper/lib64
+          mkdir -p /tmp/mali_wrapper/lib
+          mkdir -p /tmp/mali_wrapper/etc/vulkan/icd.d
           
-          # Extraemos el contenedor wrapper.tzst original del autor
-          cd /tmp/steven_raw
-          unzip -p base.apk "assets/wrapper.tzst" > /tmp/wrapper_original.tzst || true
+          SO_64=$(find mesa_src/build64 -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
+          if [ ! -z "$SO_64" ] && [ -f "$SO_64" ]; then
+            cp -f "$SO_64" /tmp/mali_wrapper/lib64/libvulkan_wrapper.so
+          else
+            cp -f mesa_src/build64/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib64/libvulkan_wrapper.so || true
+          fi
+
+          SO_32=$(find mesa_src/build32 -name "libgallium_dri.so" -o -name "libvulkan_freedreno.so" -o -name "*dri.so" | head -n 1)
+          if [ ! -z "$SO_32" ] && [ -f "$SO_32" ]; then
+            cp -f "$SO_32" /tmp/mali_wrapper/lib/libvulkan_wrapper.so
+          else
+            cp -f mesa_src/build32/src/gallium/targets/dri/libgallium_dri.so /tmp/mali_wrapper/lib/libvulkan_wrapper.so || true
+          fi
+          
+          # SOLUCIÓN DE SINTAXIS INDESTRUCTIBLE: Escribimos el JSON en una sola línea plana con el punto oficial
+          echo '{"ICD": {"api_version": "1.1.0", "library_path": "libvulkan_wrapper.so"}}' > /tmp/mali_wrapper/etc/vulkan/icd.d/wrapper_icd.aarch64.json
+
+      - name: 7. Empaquetar Entorno Dual en Formato wrapper.tzst Máximo Rendimiento
+        run: |
+          cd /tmp/mali_wrapper
+          tar -cf - . | zstd -19 > /tmp/wrapper.tzst
           cd -
 
-      - name: 3. Desempaquetar y Cambiar Nombre del Manifiesto a wrapper_icd.aarch64.json
-        run: |
-          mkdir -p /tmp/mali_extract
-          # Descompresión del contenedor original de Steven
-          tar -I zstd -xf /tmp/wrapper_original.tzst -C /tmp/mali_extract || true
-          
-          # Buscamos las carpetas de configuración icd.d internas
-          find /tmp/mali_extract -type d -name "icd.d" | while read -r icd_dir; do
-            echo "Modificando estructura ICD en la ruta: $icd_dir"
-            # Limpiamos rastros anteriores de nombres genéricos
-            rm -rf "$icd_dir"/*
-            
-            # PARCHE MAESTRO: Escribimos el JSON con la nomenclatura de punto exacta exigida por tu sistema
-            cat << 'EOF' > "$icd_dir"/wrapper_icd.aarch64.json
-            {
-              "ICD": {
-                "api_version": "1.1.0",
-                "library_path": "libvulkan_wrapper.so"
-              }
-            }
-            EOF
-          done
-
-      - name: 4. Reempaquetar el Contenedor en Formato Puro wrapper.tzst
-        run: |
-          mkdir -p /tmp/artifact_output
-          cd /tmp/mali_extract
-          # Volvemos a comprimir la estructura original intacta con el nuevo JSON fijado (ZSTD Nivel 19)
-          tar -cf - . | zstd -19 > /tmp/artifact_output/wrapper.tzst
-          cd -
-
-      - name: 5. Subir wrapper.tzst Terminado a tus Artifacts de GitHub
+      - name: 8. Subir wrapper.tzst Dual Completo a tus Artifacts de GitHub
         uses: actions/upload-artifact@v4
         with:
-          name: wrapper-tzst-Steven-Mali-Corregido
-          path: /tmp/artifact_output/wrapper.tzst
+          name: Mesa-Overcmd-Wrapper-Dual-Unisoc
+          path: /tmp/wrapper.tzst
