@@ -55,14 +55,17 @@ jobs:
           endian = 'little'
           EOF
 
-      - name: 4. Crear Puente Simulado (Mock) de cutils para Android en Linux
+      - name: 4. Crear Puente Simulado (Mock) de Capas HAL Android en Linux
         run: |
-          # Creamos una cabecera local ficticia de cutils para que el compilador no tire fallos de enlaces
+          # Creamos las cabeceras locales ficticias para que el preprocesador pase de largo sin romper la sintaxis
           mkdir -p /tmp/mock_ndk/include/cutils
+          mkdir -p /tmp/mock_ndk/include/hardware
           echo -e '#ifndef _CUTILS_H\n#define _CUTILS_H\n#endif' > /tmp/mock_ndk/include/cutils/properties.h
+          echo -e '#ifndef _HARDWARE_H\n#define _HARDWARE_H\n#endif' > /tmp/mock_ndk/include/hardware/hardware.h
           
-          # Generamos el archivo de configuración .pc para engañar a pkg-config de forma legal
           mkdir -p /tmp/pkgconfig
+          
+          # Puente 1: cutils
           cat << 'EOF' > /tmp/pkgconfig/cutils.pc
           Name: cutils
           Description: Android cutils mock bridge
@@ -71,11 +74,20 @@ jobs:
           Libs:
           EOF
           
-          # Hacemos lo mismo para libglvnd que a veces interrumpe la carga de entornos Gallium sin ventana nativa
+          # Puente 2: hardware HAL (Fijado para saltar el error 876)
+          cat << 'EOF' > /tmp/pkgconfig/hardware.pc
+          Name: hardware
+          Description: Android hardware HAL mock bridge
+          Version: 1.0
+          Cflags: -I/tmp/mock_ndk/include
+          Libs:
+          EOF
+          
+          # Puente 3: libglvnd (Corregido a versión 1.4.0 para cumplir el requerimiento de Mesa >= 1.3.2)
           cat << 'EOF' > /tmp/pkgconfig/libglvnd.pc
           Name: libglvnd
           Description: OpenGL Alternative wrapper mock
-          Version: 1.0
+          Version: 1.4.0
           Cflags:
           Libs:
           EOF
