@@ -1,0 +1,126 @@
+name: Compilación Real Rama Pipetto-Mesa 25 MALI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mali-mesa:
+    runs-on: ubuntu-latest
+
+    env:
+      BUILD_DIR: build_output
+
+    steps:
+      - name: Checkout del Repositorio Core (Pipetto-Mesa)
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Configurar Herramientas de Compilación Nativas Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build cmake pkg-config python3-mako python3-pip zstd tar wget glslang-tools libdrm-dev
+
+      - name: Activar Android NDK Nativo del Servidor (Cero Descargas Externas)
+        run: |
+          NDK_SERVER_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/* | tail -n 1)
+          if [ -z "$NDK_SERVER_PATH" ]; then
+            NDK_SERVER_PATH="/usr/local/lib/android/sdk/ndk-bundle"
+          fi
+          echo "ANDROID_NDK_LATEST_HOME=$NDK_SERVER_PATH" >> $GITHUB_ENV
+
+      - name: Modificación Quirúrgica del Silicio (Inyección Anti-Leak en el Core del Wrapper)
+        run: |
+          echo "-> Purgando dependencias estrictas de Qualcomm para habilitar GPU Mali..."
+          if [ -f "subprojects/libadrenotools/meson.build" ]; then
+            sed -i "s/dependency('android')/dependency('android', required: false)/g" subprojects/libadrenotools/meson.build || true
+          fi
+
+          echo "-> Localizando el archivo maestro de inicialización de la GPU..."
+          WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
+          
+          if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
+            echo "-> Saneando y soldando valvula mallopt en: $WRAPPER_DEVICE"
+            sed -i 's/\r$//' "$WRAPPER_DEVICE"
+            
+            # 1. Inyectamos la cabecera oficial de malloc al principio de la estructura
+            sed -i '1i#include <malloc.h>' "$WRAPPER_DEVICE"
+            
+            # 2. Sembramos el vaciado de buffers de Android directamente en la inicialización de la instancia.
+            # Esto obliga a tu Unisoc T618 a liberar la cache de texturas viejas inmediatamente al cerrar el combate,
+            # manteniendo la estabilidad en la pantalla de recompensas sin tirones térmicos.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\    mallopt(-1000, 0);' "$WRAPPER_DEVICE"
+            
+            # 3. Redirección de escape de PRoot para saltar el aislamiento de las carpetas de Android en Winlator/Bannerlator
+            sed -i 's|"/system/lib64/libvulkan.so"|"/host-rootfs/system/lib64/libvulkan.so"|g' "$WRAPPER_DEVICE"
+            sed -i 's|"/system/lib/libvulkan.so"|"/host-rootfs/system/lib/libvulkan.so"|g' "$WRAPPER_DEVICE"
+          fi
+
+          echo "-> Forjando el archivo de configuracion cruzada android_mali.toml lícito..."
+          # Generamos un archivo de compilación cruzada limpio que apunta al compilador real del NDK del servidor
+          cat << EOF > android_mali.toml
+          [binaries]
+          c = '${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang'
+          cpp = '${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++'
+          ar = '${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
+          strip = '${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
+          pkg-config = '/usr/bin/pkg-config'
+
+          [built-in options]
+          c_args = ['--sysroot=${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot', '-w', '-D_GNU_SOURCE']
+          cpp_args = ['--sysroot=${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot', '-w', '-D_GNU_SOURCE']
+          c_link_args = ['--sysroot=${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot', '-Wl,--allow-shlib-undefined']
+          cpp_link_args = ['--sysroot=${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot', '-Wl,--allow-shlib-undefined']
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8-a'
+          endian = 'little'
+          EOF
+
+          # Parche preventivo para inclusiones Unix huérfanas en entornos virtuales
+          find src/ -name "wrapper_device_memory.c" -exec sed -i '1i#include <fcntl.h>' {} + || true
+          find src/ -name "wrapper_physical_device.c" -exec sed -i '1i#include <fcntl.h>' {} + || true
+
+      - name: Configurar e Inicializar Entorno de Pipetto (Meson Setup)
+        run: |
+          # Inicializamos el entorno cruzado puro emulando los pasos del repositorio de la rama wrapper-25
+          meson setup ${{ env.BUILD_DIR }} \
+            --cross-file android_mali.toml \
+            -Dvulkan-drivers=wrapper \
+            -Dgallium-drivers=[] \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=26 \
+            -Dshared-glapi=enabled \
+            -Dllvm=disabled \
+            -Dwerror=false
+
+      - name: Disparar la Forja de la Scene (Ninja Build)
+        run: |
+          ninja -C ${{ env.BUILD_DIR }} -j $(nproc)
+
+      - name: Estructurar el Archivo libvulkan_wrapper.so Monolítico Real
+        run: |
+          mkdir -p wrapper_final/usr/lib
+          mkdir -p wrapper_final/usr/share/vulkan/icd.d
+          
+          # Buscamos el binario real generado por las dependencias de Mesa
+          COMPILED_SO=$(find ${{ env.BUILD_DIR }} -name "libvulkan_wrapper.so" | head -n 1)
+          cp -f "$COMPILED_SO" wrapper_final/usr/lib/libvulkan_wrapper.so
+          
+          # Despojamos residuos redundantes con LLVM Strip para estabilizar el rendimiento
+          ${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-all wrapper_final/usr/lib/libvulkan_wrapper.so
+          
+          # Manifiesto ICD JSON oficial que exige el cargador de Bannerlator
+          printf '{\n    "file_format_version": "1.0.0",\n    "ICD": {\n        "library_path": "libvulkan_wrapper.so",\n        "api_version": "1.1.0"\n    }\n}\n' > wrapper_final/usr/share/vulkan/icd.d/icd_wrapper.json
+          
+          tar -cf wrapper.tar -C wrapper_final usr
+          zstd -19 --rm wrapper.tar -o wrapper.tzst
+
+      - name: Subir Driver Unificado Pipetto-Mesa MALI a GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrapper-vulkan-pipetto-mali
+          path: wrapper.tzst
+          compression-level: 0
