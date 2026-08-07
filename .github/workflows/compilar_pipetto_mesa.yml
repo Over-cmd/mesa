@@ -27,14 +27,15 @@ jobs:
             echo "-> Soldando la purga de memoria nativa de Bionic y prototipos duales..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
-            # 1. Inyectamos la cabecera de malloc y la DECLARACIÓN PUBLIC previa de la función de 32 bits en la línea 1
-            # Esto satisface de forma legítima al compilador esquivando la regla estricta de prototipos faltantes
-            sed -i '1i#include <malloc.h>\nPUBLIC void* vk_icdGetInstanceProcAddr32(void* instance, const char* pName);' "$WRAPPER_DEVICE"
+            # 1. Inyectamos la cabecera de malloc y la DECLARACIÓN pura de Clang sin usar la macro PUBLIC que aun no existe en la linea 1
+            # Esto blinda a Clang contra la regla estricta de advertencias -Wmissing-prototypes sin colapsar el tipado
+            sed -i '1i#include <malloc.h>\n__attribute__((visibility("default"))) void* vk_icdGetInstanceProcAddr32(void* instance, const char* pName);' "$WRAPPER_DEVICE"
             
-            # 2. Sembramos la purga de buffers nativo de Android (MALLOPT) en tu punto de entrada original
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\    extern int mallopt(int p, int v);\\n    mallopt(-1000, 0);' "$WRAPPER_DEVICE"
+            # 2. Sembramos el vaciado de buffers nativo de Android (MALLOPT) de forma compacta dentro de la instancia de 64 bits
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;iextern int mallopt(int p, int v); mallopt(-1000, 0);' "$WRAPPER_DEVICE"
             
-            # 3. LA JUGADA MAESTRA DE CIERRE DE 32 BITS: Acoplamos el cuerpo de la función espejo
+            # 3. LA JUGADA MAESTRA DE CIERRE DE 32 BITS: Acoplamos el cuerpo usando la macro PUBLIC al final del archivo
+            # donde las cabeceras de Mesa ya estan 100% cargadas y operativas en el compilador.
             printf '\n\nPUBLIC void* vk_icdGetInstanceProcAddr32(void* instance, const char* pName) {\n    extern int mallopt(int p, int v);\n    mallopt(-1000, 0);\n    return vk_icdGetInstanceProcAddr(instance, pName);\n}\n' >> "$WRAPPER_DEVICE"
             
             echo "-> Silicio core de Mesa 25 modificado con éxito."
