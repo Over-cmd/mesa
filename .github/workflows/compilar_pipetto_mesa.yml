@@ -57,7 +57,6 @@ jobs:
           fi
 
           echo "-> Forjando el archivo de configuracion cruzada android_mali.toml lícito..."
-          # Generamos un archivo de compilación cruzada limpio que apunta al compilador real del NDK del servidor
           cat << EOF > android_mali.toml
           [binaries]
           c = '${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang'
@@ -79,13 +78,12 @@ jobs:
           endian = 'little'
           EOF
 
-          # Parche preventivo para inclusiones Unix huérfanas en entornos virtuales
           find src/ -name "wrapper_device_memory.c" -exec sed -i '1i#include <fcntl.h>' {} + || true
           find src/ -name "wrapper_physical_device.c" -exec sed -i '1i#include <fcntl.h>' {} + || true
 
       - name: Configurar e Inicializar Entorno de Pipetto (Meson Setup)
         run: |
-          # Inicializamos el entorno cruzado puro emulando los pasos del repositorio de la rama wrapper-25
+          # LA JUGADA MAESTRA MALI: Desactivamos zstd de la cache para evitar la busqueda de cabeceras de PC inexistentes
           meson setup ${{ env.BUILD_DIR }} \
             --cross-file android_mali.toml \
             -Dvulkan-drivers=wrapper \
@@ -94,6 +92,7 @@ jobs:
             -Dplatform-sdk-version=26 \
             -Dshared-glapi=enabled \
             -Dllvm=disabled \
+            -Dzstd=disabled \
             -Dwerror=false
 
       - name: Disparar la Forja de la Scene (Ninja Build)
@@ -105,14 +104,11 @@ jobs:
           mkdir -p wrapper_final/usr/lib
           mkdir -p wrapper_final/usr/share/vulkan/icd.d
           
-          # Buscamos el binario real generado por las dependencias de Mesa
           COMPILED_SO=$(find ${{ env.BUILD_DIR }} -name "libvulkan_wrapper.so" | head -n 1)
           cp -f "$COMPILED_SO" wrapper_final/usr/lib/libvulkan_wrapper.so
           
-          # Despojamos residuos redundantes con LLVM Strip para estabilizar el rendimiento
           ${{ env.ANDROID_NDK_LATEST_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-all wrapper_final/usr/lib/libvulkan_wrapper.so
           
-          # Manifiesto ICD JSON oficial que exige el cargador de Bannerlator
           printf '{\n    "file_format_version": "1.0.0",\n    "ICD": {\n        "library_path": "libvulkan_wrapper.so",\n        "api_version": "1.1.0"\n    }\n}\n' > wrapper_final/usr/share/vulkan/icd.d/icd_wrapper.json
           
           tar -cf wrapper.tar -C wrapper_final usr
