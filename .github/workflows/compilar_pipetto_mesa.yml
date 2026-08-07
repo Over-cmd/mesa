@@ -37,12 +37,14 @@ jobs:
             echo "-> Silicio de Mesa modificado con éxito."
           fi
 
-          # LA JUGADA MAESTRA RECTIFICADA: Inyectamos el alias de 32 bits estrictamente en el meson.build del subdirectorio del wrapper.
-          # Esto le ordena al linker de Google que exponga 'vk_icdGetInstanceProcAddr32' como un reflejo exacto del símbolo de 64 bits.
-          # Al empaquetarse de forma legal dentro de Mesa 25, la instancia inicializará sin errores de plataforma, salvando a Darksiders 2.
-          if [ -f "src/vulkan/wrapper/meson.build" ]; then
-            sed -i 's/\r$//' src/vulkan/wrapper/meson.build
-            sed -i "s/wrapper_icd_link_args = \[/wrapper_icd_link_args = ['-Wl,--defsym=vk_icdGetInstanceProcAddr32=vk_icdGetInstanceProcAddr', /g" src/vulkan/wrapper/meson.build
+          echo "-> Reparando la tabla ELF cruzada de 32 bits en las arterias de Meson..."
+          # LA JUGADA MAESTRA DE LA SCENE: En la rama wrapper-25 de Pipetto, las opciones de linkado se configuran
+          # en la directiva shared_library del Wrapper. Aplicamos sed para inyectar el alias de 32 bits de forma lícita,
+          # forzando a que el único libvulkan_wrapper.so final exponga la firma vk_icdGetInstanceProcAddr32 de Khronos.
+          WRAPPER_MESON="src/vulkan/wrapper/meson.build"
+          if [ -f "$WRAPPER_MESON" ]; then
+            sed -i 's/\r$//' "$WRAPPER_MESON"
+            sed -i "s/link_args : /link_args : ['-Wl,--defsym=vk_icdGetInstanceProcAddr32=vk_icdGetInstanceProcAddr'], /g" "$WRAPPER_MESON"
           fi
 
           # Saneamos las rutas lícitas de escape de PRoot para el amarre de hardware de tu GPU Mali-G52
@@ -51,7 +53,7 @@ jobs:
 
       - name: compilador-envoltorio (Procesamiento Atómico en Docker MALI)
         run: |
-          # El contenedor de leegao toma el mando y devora el código modificado generando el .so unificado lícito
+          # El contenedor de leegao toma el mando y devora el código modificado generando el .so unificado dual real
           docker run --rm -v "${{ github.workspace }}:/workspace" ${{ env.IMAGE_TAG }} ${{ env.BUILD_DIR }}
 
       - name: Cargar libvulkan_wrapper.so sin formato
