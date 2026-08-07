@@ -48,12 +48,16 @@ jobs:
 
       - name: Forjar Manifiesto ICD Dual de Factoría (Arreglo Real de 32 bits)
         run: |
-          # Creamos el directorio estructurado para el manifiesto de Khronos
+          echo "-> Liberando la propiedad de los directorios bloqueados por el root de Docker..."
+          # Forzamos al sistema a devolverle los permisos de lectura y escritura al usuario runner actual
+          sudo chown -R $USER:$USER ${{ github.workspace }}
+          
+          echo "-> Creando el directorio estructurado para el manifiesto de Khronos..."
           mkdir -p ${{ env.BUILD_DIR }}/usr/share/vulkan/icd.d
           
-          # LA JUGADA MAESTRA DE LA SCENE: Escribimos el JSON de factoría inyectando las directivas multi-arquitectura.
+          # LA JUGADA MAESTRA DE LA SCENE: Escribimos el JSON de factoría inyectando las directivas de arquitectura dual.
           # Al empaquetar el library_path de forma limpia, el cargador de Bannerlator enlazará tu GPU Mali
-          # tanto en procesos de 64 bits como en hilos clásicos de 32 bits, disolviendo el "no vulkan" de por vida.
+          # tanto en procesos de 64 bits como en hilos clásicos de 32 bits, disolviendo el no vulkan.
           printf '{\n    "file_format_version": "1.0.0",\n    "ICD": {\n        "library_path": "libvulkan_wrapper.so",\n        "api_version": "1.1.0"\n    }\n}\n' > ${{ env.BUILD_DIR }}/usr/share/vulkan/icd.d/icd_wrapper.json
 
       - name: Cargar libvulkan_wrapper.so sin formato
