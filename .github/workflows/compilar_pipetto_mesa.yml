@@ -31,27 +31,17 @@ jobs:
             sed -i '1i#include <malloc.h>' "$WRAPPER_DEVICE"
             
             # 2. Sembramos el vaciado de buffers nativo de Android (MALLOPT) en tu punto de entrada original
-            # Esto obliga a tu Unisoc T618 a liberar la memoria RAM compartida inmediatamente al terminar el duelo,
-            # destruyendo físicamente el desbordamiento de las cartas en Wizard101 y rescatando los FPS.
             sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\    extern int mallopt(int p, int v);\\n    mallopt(-1000, 0);' "$WRAPPER_DEVICE"
             
-            # 3. LA JUGADA MAESTRA DE CIERRE DE 32 BITS: Usamos la macro PUBLIC nativa de Mesa 25.
-            # Al declarar la firma vk_icdGetInstanceProcAddr32 con la macro PUBLIC (en lugar de __attribute__),
-            # le prohibimos al compilador de Docker esconder el símbolo. El binario final nacerá con la cabecera dual completa,
-            # Bannerlator lo reconocerá instantáneamente, y Darksiders 2 romperá la pantalla negra de 1 FPS.
-            cat << 'EOF' >> "$WRAPPER_DEVICE"
-
-            PUBLIC void* vk_icdGetInstanceProcAddr32(void* instance, const char* pName) {
-                extern int mallopt(int p, int v);
-                mallopt(-1000, 0);
-                return vk_icdGetInstanceProcAddr(instance, pName);
-            }
-            EOF
+            # 3. LA JUGADA MAESTRA DE CIERRE DE 32 BITS POR PRINTF: Inyectamos el cuerpo de la función espejo
+            # usando la macro PUBLIC oficial de Mesa 25. Al viajar en una sola cadena limpia de texto plano,
+            # rompemos de raíz el error de EOF de Bash, forzando a que el binario exponga la firma dual de Khronos.
+            printf '\n\nPUBLIC void* vk_icdGetInstanceProcAddr32(void* instance, const char* pName) {\n    extern int mallopt(int p, int v);\n    mallopt(-1000, 0);\n    return vk_icdGetInstanceProcAddr(instance, pName);\n}\n' >> "$WRAPPER_DEVICE"
             
             echo "-> Silicio core de Mesa 25 modificado con éxito."
           fi
 
-          # Saneamos las rutas lícitas de escape de PRoot para el amarre de hardware real de tu GPU Mali-G52
+          # Saneamos las rutas lícitas de escape de PRoot para el amarre de hardware de tu GPU Mali-G52
           find src/ -name "*.c" -exec sed -i 's|"/system/lib64/libvulkan.so"|"/host-rootfs/system/lib64/libvulkan.so"|g' {} + || true
           find src/ -name "*.c" -exec sed -i 's|"/system/lib/libvulkan.so"|"/host-rootfs/system/lib/libvulkan.so"|g' {} + || true
 
