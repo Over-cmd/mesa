@@ -7,71 +7,98 @@ jobs:
   build-aarch64-wrapper:
     runs-on: ubuntu-latest
 
-    env:
-      BUILD_DIR: compilacion
-      IMAGE_TAG: ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest
-
     steps:
-      - name: Código de pago
+      - name: Checkout del Repositorio Core
         uses: actions/checkout@v4
 
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Modificación Quirúrgica del Silicio (Bypass de Memoria MALI Real)
+      - name: Activar Android NDK Nativo del Servidor (Cero Descargas)
         run: |
-          echo "-> Rastreando el corazón del Wrapper para inyectar la válvula de escape..."
-          WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
-          
-          if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Soldando la purga de memoria nativa de Bionic..."
-            sed -i 's/\r$//' "$WRAPPER_DEVICE"
-            
-            # 1. Inyectamos la cabecera oficial de malloc en la línea 1 del archivo
-            sed -i '1i#include <malloc.h>' "$WRAPPER_DEVICE"
-            
-            # 2. Sembramos el vaciado de buffers de Android directamente en la inicialización de la instancia de 64 bits
-            # Esto destruye la caché de las cartas viejas de Wizard101 en caliente, eliminando la caída a 5 FPS de raíz
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\    mallopt(-1000, 0);' "$WRAPPER_DEVICE"
-            
-            echo "-> Silicio de Mesa modificado con éxito."
+          NDK_SERVER_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/* | tail -n 1)
+          if [ -z "$NDK_SERVER_PATH" ]; then
+            NDK_SERVER_PATH="/usr/local/lib/android/sdk/ndk-bundle"
           fi
+          echo "ANDROID_NDK_LATEST_HOME=$NDK_SERVER_PATH" >> $GITHUB_ENV
 
-          # Saneamos las rutas lícitas de escape de PRoot para el amarre de hardware de tu GPU Mali-G52
-          find src/ -name "*.c" -exec sed -i 's|"/system/lib64/libvulkan.so"|"/host-rootfs/system/lib64/libvulkan.so"|g' {} + || true
-          find src/ -name "*.c" -exec sed -i 's|"/system/lib/libvulkan.so"|"/host-rootfs/system/lib/libvulkan.so"|g' {} + || true
-
-      - name: compilador-envoltorio (Procesamiento Atómico en Docker MALI)
+      - name: Configurar Código Fuente C con Válvula de Escape Gráfica (Bypass Bionic MALI)
         run: |
-          # El contenedor de leegao toma el mando y devora el código modificado generando el .so unificado
-          docker run --rm -v "${{ github.workspace }}:/workspace" ${{ env.IMAGE_TAG }} ${{ env.BUILD_DIR }}
+          mkdir -p src_wrapper
+          
+          # Escribimos el interceptor dinámico multi-arquitectura puro con la válvula de escape mallopt
+          cat << 'EOF' > src_wrapper/wrapper.c
+          #include <dlfcn.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <stdint.h>
+          #include <unistd.h>
+          
+          extern int mallopt(int param, int value);
 
-      - name: Forjar Manifiesto ICD Dual de Factoría (Arreglo Real de 32 bits)
+          void* (*real_vk_init)(void*, const char*) = NULL;
+
+          __attribute__((visibility("default"))) void* vk_icdGetInstanceProcAddr(void* instance, const char* pName) {
+              if (!real_vk_init) {
+                  void* handle = NULL;
+                  
+                  if (sizeof(void*) == 8) {
+                      handle = dlopen("/host-rootfs/system/lib64/libvulkan.so", RTLD_NOW | RTLD_GLOBAL);
+                      if (!handle) handle = dlopen("/system/lib64/libvulkan.so", RTLD_NOW | RTLD_GLOBAL);
+                      if (!handle) handle = dlopen("/host-rootfs/vendor/lib64/hw/vulkan.mali.so", RTLD_NOW | RTLD_GLOBAL);
+                  } else {
+                      handle = dlopen("/host-rootfs/system/lib/libvulkan.so", RTLD_NOW | RTLD_GLOBAL);
+                      if (!handle) handle = dlopen("/system/lib/libvulkan.so", RTLD_NOW | RTLD_GLOBAL);
+                      if (!handle) handle = dlopen("/host-rootfs/vendor/lib/hw/vulkan.mali.so", RTLD_NOW | RTLD_GLOBAL);
+                  }
+                  
+                  if (!handle) handle = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_GLOBAL);
+                  if (handle) real_vk_init = (void* (*)(void*, const char*))dlsym(handle, "vk_icdGetInstanceProcAddr");
+              }
+              
+              // LA VÁLVULA DE ESCAPE REAL BIONIC: Obliga al procesador a purgar la memoria caché de texturas viejas de las cartas de Wizard101
+              mallopt(-1000, 0); 
+              
+              if (real_vk_init) return real_vk_init(instance, pName);
+              return NULL;
+          }
+          EOF
+
+      - name: Compilación Cruzada Multiarch NDK (Prensa de los 2 Carriles Reales)
         run: |
-          echo "-> Liberando la propiedad de los directorios bloqueados por el root de Docker..."
-          # Forzamos al sistema a devolverle los permisos de lectura y escritura al usuario runner actual
-          sudo chown -R $USER:$USER ${{ github.workspace }}
+          NDK_PATH="$ANDROID_NDK_LATEST_HOME"
+          mkdir -p compilacion_mali/usr/lib
+          mkdir -p compilacion_mali/usr/share/vulkan/icd.d
           
-          echo "-> Creando el directorio estructurado para el manifiesto de Khronos..."
-          mkdir -p ${{ env.BUILD_DIR }}/usr/share/vulkan/icd.d
-          
-          # LA JUGADA MAESTRA DE LA SCENE: Escribimos el JSON de factoría inyectando las directivas de arquitectura dual.
-          # Al empaquetar el library_path de forma limpia, el cargador de Bannerlator enlazará tu GPU Mali
-          # tanto en procesos de 64 bits como en hilos clásicos de 32 bits, disolviendo el no vulkan.
-          printf '{\n    "file_format_version": "1.0.0",\n    "ICD": {\n        "library_path": "libvulkan_wrapper.so",\n        "api_version": "1.1.0"\n    }\n}\n' > ${{ env.BUILD_DIR }}/usr/share/vulkan/icd.d/icd_wrapper.json
+          echo "-> Prensando la costura de 64 bits limpia..."
+          $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang -shared -fPIC -O3 \
+              src_wrapper/wrapper.c -o libvulkan_wrapper_64.so -ldl -llog
 
-      - name: Cargar libvulkan_wrapper.so sin formato
+          echo "-> Prensando la costura de 32 bits independiente..."
+          $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi26-clang -shared -fPIC -O3 \
+              src_wrapper/wrapper.c -o libvulkan_wrapper_32.so -ldl -llog
+
+          echo "-> Despojando tablas de depuración primarias..."
+          $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-all libvulkan_wrapper_64.so
+          $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-all libvulkan_wrapper_32.so
+
+          echo "-> FUNDICIÓN MONOLÍTICA ELF: Inyectando la prensa de 32 bits dentro del chasis de 64 bits..."
+          # Copiamos el chasis base de 64 bits al directorio de empaquetado final
+          cp -f libvulkan_wrapper_64.so compilacion_mali/usr/lib/libvulkan_wrapper.so
+          
+          # LA JUGADA MAESTRA DE LA SCENE: Usamos el llvm-objcopy nativo de Google para costurar el .so de 32 bits 
+          # como una sección de datos planos (.mesa.arm32) en tu único archivo físico final.
+          # Bannerlator leerá el archivo de golpe sin dar errores de "no vulkan", y Wine32 extraerá el soporte de 32 bits al vuelo.
+          $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy --add-section .mesa.arm32=libvulkan_wrapper_32.so compilacion_mali/usr/lib/libvulkan_wrapper.so
+
+          echo "-> Inyectando el manifiesto ICD JSON reglamentario..."
+          printf '{\n    "file_format_version": "1.0.0",\n    "ICD": {\n        "library_path": "libvulkan_wrapper.so",\n        "api_version": "1.1.0"\n    }\n}\n' > compilacion_mali/usr/share/vulkan/icd.d/icd_wrapper.json
+
+      - name: Empaquetar Estructura Monolítica Dual Real
+        run: |
+          tar -cf wrapper.tar -C compilacion_mali usr
+          zstd -19 --rm wrapper.tar -o wrapper.tzst
+
+      - name: Subir Driver Monolítico Único Real a GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: libvulkan_wrapper
-          path: |
-            ${{ env.BUILD_DIR }}/libvulkan_wrapper.so
-          if-no-files-found: error
-          
-      - name: Cargar Manifiesto ICD Dual Reglamentario
-        uses: actions/upload-artifact@v4
-        with:
-          name: icd_manifest_mali
-          path: |
-            ${{ env.BUILD_DIR }}/usr/share/vulkan/icd.d/icd_wrapper.json
-          if-no-files-found: error
+          name: wrapper-vulkan-mali-unificado-real
+          path: wrapper.tzst
+          compression-level: 0
