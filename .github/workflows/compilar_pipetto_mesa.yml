@@ -27,29 +27,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Anti-Overflow, Smooth Videos & Vulkan Loading MALI)
+      - name: Surgical Silicon Modification (Unisoc T618 DXVK Loading Optimization)
         run: |
-          echo "-> Rastreando el corazon del Wrapper para inyectar las variables de carga Vulkan..."
+          echo "-> Ajustando el nucleo del wrapper para la GPU Mali-G52 del Unisoc T618..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Soldando valvula mallopt y parches de aceleracion DXVK/Vulkan..."
+            echo "-> Soldando mallopt y parches de precarga asincrona para DXVK..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
             # Inyectamos prototipos estándar de gestión de memoria y variables de entorno
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
             sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN AGREGADA PURAMENTE PARA DXVK Y VULKAN:
-            # 1. MESA_VK_CACHE_DISABLE=0 activa la cache en disco exclusiva para drivers Vulkan de Mesa.
-            # 2. DXVK_ASYNC=1 (o virgl_native_vulkan) permite que DXVK compile los shaders en hilos secundarios.
-            # 3. MESA_VK_WSI_PRESENT_MODE=mailbox mantiene estables los FPS y cinemáticas.
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_VK_CACHE_DISABLE", "0", 1);\\n setenv("DXVK_ASYNC", "1", 1);' "$WRAPPER_DEVICE"
+            # MODIFICACIÓN OPTIMIZADA PARA UNISOC T618 (Mali-G52):
+            # 1. MESA_VK_CACHE_DISABLE=0 -> Activa la cache en disco para que no recompile shaders en cada carga.
+            # 2. dxvk.numCompilerThreads=4 -> Limita los hilos de DXVK a 4 para no asfixiar los 8 nucleos del T618.
+            # 3. MESA_VK_WSI_PRESENT_MODE=mailbox -> Mantiene los videos y menús fluidos como te gustaba.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_VK_CACHE_DISABLE", "0", 1);\\n setenv("dxvk.numCompilerThreads", "4", 1);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa modificado con éxito (Carga rápida Vulkan)."
+            echo "-> Inyección para Unisoc T618 aplicada con éxito."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa Vulkan..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_VK_CACHE_DISABLE", "0", 1); setenv("DXVK_ASYNC", "1", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa T618..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_VK_CACHE_DISABLE", "0", 1); setenv("dxvk.numCompilerThreads", "4", 1); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
