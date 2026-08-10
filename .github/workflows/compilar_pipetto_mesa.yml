@@ -27,29 +27,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Anti-Overflow & Sync Balance MALI)
+      - name: Surgical Silicon Modification (Max FPS & Pure Anti-Overflow MALI)
         run: |
-          echo "-> Rastreando el corazon del Wrapper para restaurar el flujo estable MALI..."
+          echo "-> Rastreando el corazon del Wrapper para restaurar Maximos FPS..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Soldando valvula de purga y sincronizacion vertical de Vulkan..."
+            echo "-> Aplicando purga atómica limpia y liberando restricciones de sincronización..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
-            # Inyectamos prototipos estándar de gestión de memoria y sistema
+            # Inyectamos el prototipo de mallopt de Android
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
-            sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN CORREGIDA:
-            # 1. Volvemos al mallopt(-1002, 0) que te mantenía el menú y el juego estables sin saturar la RAM.
-            # 2. Eliminamos los overrides de extensiones pesados que daban tirones.
-            # 3. Forzamos vk_x11_strict_image_count y vk_wait_for_present para sincronizar logos y videos perfectamente.
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("vk_x11_strict_image_count", "true", 1);\\n setenv("vk_wait_for_present", "true", 1);' "$WRAPPER_DEVICE"
+            # MODIFICACIÓN LIMPIA: Volvemos al mallopt(-1002, 0) que daba máxima fluidez y eliminamos los bloqueos de FPS
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n mallopt(-1002, 0);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa restaurado con equilibrio de sincronizacion."
+            echo "-> Silicio de Mesa restaurado para maximo rendimiento sin cuellos de botella."
           else
             echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa limpia..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("vk_x11_strict_image_count", "true", 1); setenv("vk_wait_for_present", "true", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); mallopt(-1002, 0); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
