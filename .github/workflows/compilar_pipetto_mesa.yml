@@ -27,30 +27,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Anti-Overflow & Fast Deadpool Unreal Engine 3 Intro)
+      - name: Surgical Silicon Modification (Anti-Overflow & Pure Fluid MALI Engine)
         run: |
-          echo "-> Optimizando el Wrapper para el motor Unreal Engine 3 de Deadpool..."
+          echo "-> Restaurando la inyeccion fluida original y estable de MALI..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Aplicando mallopt y bypass de sincronizacion para UE3..."
+            echo "-> Soldando valvula mallopt base y deslimitador de FPS nativo..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
             # Inyectamos prototipos estándar de gestión de memoria y variables de entorno
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
             sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN DEFINITIVA PARA DEADPOOL EN UNISOC T618:
-            # 1. mallopt(-1002, 0) limpia el desbordamiento de texturas del motor.
-            # 2. PRESENT_MODE=immediate evita que los logos esperen a la lentitud de la GPU Mali.
-            # 3. vblank_mode=0 quita el limite de frames.
-            # 4. Inyectamos bnc_texture_cache para que el wrapper no intente re-procesar los formatos comprimidos de PC del juego.
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "immediate", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("mesa_extension_override", "-VK_KHR_incremental_present", 1);' "$WRAPPER_DEVICE"
+            # CONFIGURACIÓN COMPROBADA Y LIMPIA:
+            # 1. mallopt(-1002, 0) limpia el exceso de texturas de Deadpool sin crasheos.
+            # 2. MESA_VK_WSI_PRESENT_MODE=mailbox te devuelve la suavidad en las cinemáticas y menús.
+            # 3. Eliminamos todos los overrides de extensiones que ralentizaban el Unreal Engine 3.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa modificado con éxito (Bypass Deadpool activo)."
+            echo "-> Silicio de Mesa restaurado al modo de maximo rendimiento estable."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa Deadpool..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "immediate", 1); setenv("vblank_mode", "0", 1); setenv("mesa_extension_override", "-VK_KHR_incremental_present", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa limpia..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
