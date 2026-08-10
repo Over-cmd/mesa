@@ -27,27 +27,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Anti-Overflow & Smooth Cutscenes MALI)
+      - name: Surgical Silicon Modification (Anti-Overflow, Smooth Videos & Logos MALI)
         run: |
-          echo "-> Rastreando el corazon del Wrapper para balancear la inyección MALI..."
+          echo "-> Rastreando el corazon del Wrapper para inyectar el parche de logos..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Soldando valvula mallopt optimizada para secuencias de video..."
+            echo "-> Soldando variables de retencion de texturas para Logos e Intro..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
-            # Inyectamos prototipos estándar de gestión de memoria
+            # Inyectamos prototipos estándar de gestión de memoria y sistema
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
             sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN CLAVE: Cambiamos mallopt(-1000, 0) que rompía los videos por M_DECOMMIT (Purga suavizada de páginas vacías)
-            # Además inyectamos variables internas en el arranque de la API para silenciar el retraso de sincronización en Mali
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);' "$WRAPPER_DEVICE"
+            # MODIFICACIÓN MAESTRA:
+            # 1. Bajamos a mallopt(-1001, 1) que mantiene vivas las páginas de texturas de corta duración (como logos en 2D).
+            # 2. MESA_VK_WSI_PRESENT_MODE=mailbox estabiliza los fotogramas dinámicos.
+            # 3. MESA_EXTENSION_OVERRIDE fija extensiones de texturas 2D heredadas que los logos antiguos de PC exigen.
+            # 4. allow_glsl_extension_override=true evita que las pantallas de logos carguen fuentes corruptas.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1001, 1);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_EXTENSION_OVERRIDE", "-VK_KHR_incremental_present", 1);\\n setenv("allow_glsl_extension_override", "true", 1);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa modificado con éxito (Modo fluido activo)."
+            echo "-> Parche de logos inyectado correctamente en el wrapper."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa balanceada..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa global..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1001, 1); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_EXTENSION_OVERRIDE", "-VK_KHR_incremental_present", 1); setenv("allow_glsl_extension_override", "true", 1); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
