@@ -27,25 +27,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Max FPS & Pure Anti-Overflow MALI)
+      - name: Surgical Silicon Modification (Anti-Overflow, Smooth Videos & Vulkan Loading MALI)
         run: |
-          echo "-> Rastreando el corazon del Wrapper para restaurar Maximos FPS..."
+          echo "-> Rastreando el corazon del Wrapper para inyectar las variables de carga Vulkan..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Aplicando purga atómica limpia y liberando restricciones de sincronización..."
+            echo "-> Soldando valvula mallopt y parches de aceleracion DXVK/Vulkan..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
-            # Inyectamos el prototipo de mallopt de Android
+            # Inyectamos prototipos estándar de gestión de memoria y variables de entorno
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
+            sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN LIMPIA: Volvemos al mallopt(-1002, 0) que daba máxima fluidez y eliminamos los bloqueos de FPS
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n mallopt(-1002, 0);' "$WRAPPER_DEVICE"
+            # MODIFICACIÓN AGREGADA PURAMENTE PARA DXVK Y VULKAN:
+            # 1. MESA_VK_CACHE_DISABLE=0 activa la cache en disco exclusiva para drivers Vulkan de Mesa.
+            # 2. DXVK_ASYNC=1 (o virgl_native_vulkan) permite que DXVK compile los shaders en hilos secundarios.
+            # 3. MESA_VK_WSI_PRESENT_MODE=mailbox mantiene estables los FPS y cinemáticas.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_VK_CACHE_DISABLE", "0", 1);\\n setenv("DXVK_ASYNC", "1", 1);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa restaurado para maximo rendimiento sin cuellos de botella."
+            echo "-> Silicio de Mesa modificado con éxito (Carga rápida Vulkan)."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa limpia..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); mallopt(-1002, 0); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa Vulkan..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_VK_CACHE_DISABLE", "0", 1); setenv("DXVK_ASYNC", "1", 1); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
