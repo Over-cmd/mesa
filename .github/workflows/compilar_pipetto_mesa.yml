@@ -27,29 +27,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Max Performance & Smooth Deadpool Loading MALI)
+      - name: Surgical Silicon Modification (Anti-Overflow & Ultra Fast Loading MALI)
         run: |
-          echo "-> Sincronizando el Wrapper para evitar la caida de FPS en la carga de Deadpool..."
+          echo "-> Rastreando el corazon del Wrapper para desatascar las cargas de Deadpool..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Soldando parches de estabilidad de hilos para pantallas de carga..."
+            echo "-> Soldando parches de descarte directo de buffers estaticos..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
             # Inyectamos prototipos estándar de gestión de memoria y variables de entorno
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
             sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN MAESTRA DE ESTABILIDAD DE CARGA:
-            # 1. Mantener mallopt(-1002, 0) y mailbox para conservar la excelente fluidez que ya logramos.
-            # 2. Inyectar MESA_VK_WSI_QUEUE_SIZE=2 para reducir la carga de triple bufer a doble bufer dinamico en pantallas estaticas.
-            # 3. Inyectar vblank_mode=0 para que los FPS vuelen una vez dentro del menu.
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_VK_WSI_QUEUE_SIZE", "2", 1);' "$WRAPPER_DEVICE"
+            # PARCHE MAESTRO PARA EVITAR LA CONGELACIÓN EN CARGAS DE UNREAL ENGINE 3:
+            # 1. Conservamos mallopt(-1002, 0) y mailbox para que los videos y el gameplay sigan perfectos.
+            # 2. Inyectamos MESA_VK_WSI_PRESENT_MODE=mailbox y vblank_mode=0 para liberar los FPS.
+            # 3. Inyectamos MESA_VK_WSI_QUEUE_SIZE=1 para forzar la cola mas ligera posible en pantallas estaticas.
+            # 4. Inyectamos dxvk.allowDirectDiscard=true para que DXVK no se quede esperando fotogramas en las cargas.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_VK_WSI_QUEUE_SIZE", "1", 1);\\n setenv("dxvk.allowDirectDiscard", "true", 1);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa modificado con exito (Carga estabilizada)."
+            echo "-> Silicio de Mesa modificado con exito (Bypass de congelacion activo)."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa global..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_VK_WSI_QUEUE_SIZE", "2", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa limpia..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_VK_WSI_QUEUE_SIZE", "1", 1); setenv("dxvk.allowDirectDiscard", "true", 1); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
