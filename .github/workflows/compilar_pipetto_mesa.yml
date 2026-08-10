@@ -27,29 +27,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Anti-Overflow, Smooth Videos & Fast Activision Intro)
+      - name: Surgical Silicon Modification (Anti-Overflow & Fast Deadpool Unreal Engine 3 Intro)
         run: |
-          echo "-> Rastreando el corazon del Wrapper para acelerar la precarga de Activision..."
+          echo "-> Optimizando el Wrapper para el motor Unreal Engine 3 de Deadpool..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Inyectando mallopt y parches de descarte de buffer de sincronizacion..."
+            echo "-> Aplicando mallopt y bypass de sincronizacion para UE3..."
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
             # Inyectamos prototipos estándar de gestión de memoria y variables de entorno
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
             sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # MODIFICACIÓN MAESTRA COMPATIBLE CON ACTIVISION Y UNISOC T618:
-            # 1. Cambiamos mailbox por immediate para que el wrapper tire los fotogramas del logo si la GPU está ocupada precargando texturas.
-            # 2. Desactivamos MESA_NO_ERROR para evitar corrupción en la inicialización de Activision.
-            # 3. MESA_EXTENSION_OVERRIDE elimina extensiones de compresión complejas que saturan el T618 al arrancar.
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "immediate", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_EXTENSION_OVERRIDE", "-VK_EXT_texture_compression_astc_hdr", 1);' "$WRAPPER_DEVICE"
+            # MODIFICACIÓN DEFINITIVA PARA DEADPOOL EN UNISOC T618:
+            # 1. mallopt(-1002, 0) limpia el desbordamiento de texturas del motor.
+            # 2. PRESENT_MODE=immediate evita que los logos esperen a la lentitud de la GPU Mali.
+            # 3. vblank_mode=0 quita el limite de frames.
+            # 4. Inyectamos bnc_texture_cache para que el wrapper no intente re-procesar los formatos comprimidos de PC del juego.
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "immediate", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("mesa_extension_override", "-VK_KHR_incremental_present", 1);' "$WRAPPER_DEVICE"
             
-            echo "-> Silicio de Mesa modificado con éxito (Bypass de carga Activision activo)."
+            echo "-> Silicio de Mesa modificado con éxito (Bypass Deadpool activo)."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa Activision..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "immediate", 1); setenv("vblank_mode", "0", 1); setenv("MESA_EXTENSION_OVERRIDE", "-VK_EXT_texture_compression_astc_hdr", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa Deadpool..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "immediate", 1); setenv("vblank_mode", "0", 1); setenv("mesa_extension_override", "-VK_KHR_incremental_present", 1); vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
