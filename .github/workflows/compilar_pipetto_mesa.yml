@@ -27,37 +27,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd
 
-      - name: Surgical Silicon Modification (Anti-Overflow & Ultra Fast Loading MALI)
+      # INYECCIÓN DE CONTROL DE FLUJO HÍBRIDO EN EL CÓDIGO
+      - name: Surgical Silicon Modification (Anti-Overflow MALI Hybrid 32/64 Injection)
         run: |
-          echo "-> Rastreando el corazon del Wrapper para desatascar las cargas de Deadpool..."
+          echo "-> Rastreando el corazon del Wrapper para soldar compatibilidad hibrida Vulkan..."
           WRAPPER_DEVICE=$(find src/ -name "wrapper_device.c" | head -n 1)
           
           if [ -n "$WRAPPER_DEVICE" ] && [ -f "$WRAPPER_DEVICE" ]; then
-            echo "-> Soldando parches de descarte directo de buffers estaticos..."
+            echo "-> Aplicando parches de alineacion de memoria de 32 bits en: $WRAPPER_DEVICE"
             sed -i 's/\r$//' "$WRAPPER_DEVICE"
             
-            # Inyectamos prototipos estándar de gestión de memoria y variables de entorno
+            sed -i '1i#include <stdint.h>' "$WRAPPER_DEVICE"
             sed -i '1iextern int mallopt(int param, int value);' "$WRAPPER_DEVICE"
             sed -i '1iextern int setenv(const char *name, const char *value, int overwrite);' "$WRAPPER_DEVICE"
             
-            # PARCHE MAESTRO PARA EVITAR LA CONGELACIÓN EN CARGAS DE UNREAL ENGINE 3:
-            # 1. Conservamos mallopt(-1002, 0) y mailbox para que los videos y el gameplay sigan perfectos.
-            # 2. Inyectamos MESA_VK_WSI_PRESENT_MODE=mailbox y vblank_mode=0 para liberar los FPS.
-            # 3. Inyectamos MESA_VK_WSI_QUEUE_SIZE=1 para forzar la cola mas ligera posible en pantallas estaticas.
-            # 4. Inyectamos dxvk.allowDirectDiscard=true para que DXVK no se quede esperando fotogramas en las cargas.
-            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n setenv("MESA_VK_WSI_QUEUE_SIZE", "1", 1);\\n setenv("dxvk.allowDirectDiscard", "true", 1);' "$WRAPPER_DEVICE"
-            
-            echo "-> Silicio de Mesa modificado con exito (Bypass de congelacion activo)."
+            # Inyectamos mallopt(-1002, 0), mailbox y forzamos estabilidad de buffer en procesos de 32 bits
+            sed -i '/vk_icdGetInstanceProcAddr/!b;n;i\\ extern int mallopt(int p, int v);\\n extern int setenv(const char *n, const char *v, int o);\\n mallopt(-1002, 0);\\n setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1);\\n setenv("vblank_mode", "0", 1);\\n if (sizeof(void*) == 4) {\\n   setenv("MESA_VK_WSI_QUEUE_SIZE", "1", 1);\\n }' "$WRAPPER_DEVICE"
+            echo "-> Envoltura hibrida inyectada con exito."
           else
-            echo "-> Archivo wrapper_device.c no encontrado, aplicando inyección alternativa limpia..."
-            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); setenv("MESA_VK_WSI_QUEUE_SIZE", "1", 1); setenv("dxvk.allowDirectDiscard", "true", 1); vk_icdGetInstanceProcAddr/g' {} + || true
+            echo "-> Archivo wrapper_device.c no encontrado, aplicando fallback hibrido global..."
+            find src/ -name "*.c" -exec sed -i 's/vk_icdGetInstanceProcAddr/extern int mallopt(int p, int v); extern int setenv(const char *n, const char *v, int o); mallopt(-1002, 0); setenv("MESA_VK_WSI_PRESENT_MODE", "mailbox", 1); setenv("vblank_mode", "0", 1); if (sizeof(void*) == 4) { setenv("MESA_VK_WSI_QUEUE_SIZE", "1", 1); } vk_icdGetInstanceProcAddr/g' {} + || true
           fi
 
+      # COMPILACIÓN ORIGINAL DEL DOCKER NATIVO
       - name: Wrapper Compiler (Atomic Processing Docker MALI)
         run: |
           docker run --rm -v "${{ github.workspace }}:/workspace" ${{ env.IMAGE_TAG }} ${{ env.BUILD_DIR }}
 
-      # ESTE PASO CREA LA ESTRUCTURA EXACTA PARA BANNERLATOR Y GENERA EL ARCHIVO .TZST
+      # ¡ESTE PASO CREA LOS MANIFIESTOS DUALES EXIGIDOS POR BOX86 Y BOX64 PARA BANNERLATOR!
       - name: Structure and Pack wrapper.tzst
         run: |
           echo "-> Creando arbol de directorios de Linux para Bannerlator..."
@@ -67,7 +64,7 @@ jobs:
           echo "-> Moviendo el driver compilado a usr/lib..."
           cp ${{ env.BUILD_DIR }}/libvulkan_wrapper.so pkg/usr/lib/libvulkan_wrapper.so
           
-          echo "-> Inyectando manifiesto JSON ICD oficial en usr/share/vulkan/icd.d..."
+          echo "-> Inyectando manifiesto JSON ICD oficial de 64 bits (AArch64)..."
           cat << 'EOF' > pkg/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
           {
               "ICD": {
@@ -78,11 +75,21 @@ jobs:
           }
           EOF
           
-          echo "-> Comprimiendo la estructura en formato atómico wrapper.tzst..."
+          echo "-> Inyectando manifiesto JSON ICD oficial de 32 bits (ARM) para salvar Box86..."
+          cat << 'EOF' > pkg/usr/share/vulkan/icd.d/wrapper_icd.arm.json
+          {
+              "ICD": {
+                  "api_version": "1.3.289",
+                  "library_path": "libvulkan_wrapper.so"
+              },
+              "file_format_version": "1.0.0"
+          }
+          EOF
+          
+          echo "-> Comprimiendo la estructura dual en formato wrapper.tzst..."
           cd pkg
           tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/
           cd ..
-          
           echo "-> ¡Empaquetado completado con éxito!"
 
       - name: Upload Final wrapper.tzst for Bannerlator
